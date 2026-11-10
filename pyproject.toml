@@ -1,0 +1,19 @@
+[project]
+name = "orderbook-lab"
+version = "0.1.0"
+description = "Record Binance perpetual order-book data and measure spread, depth, imbalance and trade markouts"
+requires-python = ">=3.10"
+dependencies = ["pandas>=2.0", "numpy", "pyarrow", "websockets>=12", "tabulate"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
