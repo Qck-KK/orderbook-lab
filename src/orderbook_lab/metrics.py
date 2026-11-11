@@ -34,6 +34,21 @@ def top_of_book(book: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def tob_from_bbo(bbo: pd.DataFrame) -> pd.DataFrame:
+    """Mid from the bookTicker stream. It updates on every best-price change (not every 100 ms),
+    so it is the right reference for markouts: a 100 ms-old snapshot mid makes markouts look too good."""
+    b = bbo.dropna(subset=["E"]).sort_values("E")
+    mid = (b["bid_px"] + b["ask_px"]) / 2
+    return pd.DataFrame({"E": b["E"].astype("int64").to_numpy(), "mid": mid.to_numpy()})
+
+
+def book_span_bps(book: pd.DataFrame, n_levels: int = 20) -> pd.Series:
+    """How far from mid the recorded levels reach (average of bid and ask side), in bps."""
+    mid = (book["bid_px_0"] + book["ask_px_0"]) / 2
+    last = n_levels - 1
+    return 1e4 * (book[f"ask_px_{last}"] - book[f"bid_px_{last}"]) / 2 / mid
+
+
 def depth_within(book: pd.DataFrame, bps: float, n_levels: int = 20) -> pd.DataFrame:
     """Total bid and ask quantity within `bps` of mid (per snapshot)."""
     mid = (book["bid_px_0"] + book["ask_px_0"]) / 2

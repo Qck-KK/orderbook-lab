@@ -16,20 +16,28 @@ def build(data: Path) -> str:
     book = M.load(data, "book")
     trades = M.load(data, "trades")
     tob = M.top_of_book(book)
-    dep = M.depth_within(book, 10)
+    span = M.book_span_bps(book)
+    top5 = sum(book[f"bid_qty_{i}"] + book[f"ask_qty_{i}"] for i in range(5))
+    top20_bid = sum(book[f"bid_qty_{i}"] for i in range(20))
+    top20_ask = sum(book[f"ask_qty_{i}"] for i in range(20))
     imb = M.imbalance(book, 5)
-    mo = M.markouts(trades, tob)
+    try:
+        ref, ref_name = M.tob_from_bbo(M.load(data, "bbo")), "bookTicker mid"
+    except FileNotFoundError:
+        ref, ref_name = tob[["E", "mid"]], "100 ms snapshot mid (stale; markouts biased up)"
+    mo = M.markouts(trades, ref)
 
     span_min = (tob["E"].iloc[-1] - tob["E"].iloc[0]) / 60000
     lines = [
         "# Order-book report",
         f"- snapshots: {len(book):,}, trades: {len(trades):,}, span: {span_min:.1f} min",
         f"- spread (bps): median {tob['spread_bps'].median():.3f}, p95 {tob['spread_bps'].quantile(.95):.3f}",
-        f"- depth within 10 bps (median qty): bid {dep.iloc[:,1].median():.2f}, ask {dep.iloc[:,2].median():.2f}",
+        f"- top 20 levels reach only {span.median():.2f} bps from mid (median), so depth is 'top-of-book depth', not a wide band",
+        f"- depth, median qty: top 5 levels both sides {top5.median():.2f}; top 20 bid {top20_bid.median():.2f}, ask {top20_ask.median():.2f}",
         f"- 5-level imbalance: mean {imb.mean():+.3f}, sd {imb.std():.3f}",
         f"- realised vol (1s bars, annualised): {M.realized_vol(tob):.1%}",
         "",
-        "## Markouts by trade-size quartile (bps, signed by aggressor)",
+        f"## Markouts by trade-size quartile (bps, signed by aggressor; reference: {ref_name})",
         M.summarize_markouts(mo.dropna()).round(3).to_markdown(),
         "",
         "## Does imbalance predict the next 5s mid move?",
