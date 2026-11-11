@@ -89,3 +89,29 @@ def test_end_to_end_report(tmp_path):
     w.flush()
     text = build(tmp_path)
     assert "Markouts" in text and "spread (bps)" in text
+
+
+def test_stream_urls_are_routed():
+    from orderbook_lab.recorder import stream_urls
+    pub, mkt = stream_urls("BTCUSDT")
+    assert "/public/stream" in pub and "depth20@100ms" in pub and "bookTicker" in pub
+    assert "/market/stream" in mkt and "btcusdt@aggTrade" in mkt
+
+
+def test_record_with_fake_websockets(tmp_path, monkeypatch):
+    import asyncio, json, sys, types
+    from orderbook_lab import recorder
+
+    class FakeWS:
+        def __init__(self, url): self.url, self.n = url, 0
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def recv(self):
+            await asyncio.sleep(0.01); self.n += 1
+            if "market" in self.url:
+                return json.dumps({"stream": "btcusdt@aggTrade", "data": {"E": self.n, "T": self.n, "a": self.n, "p": "1", "q": "1", "m": False}})
+            return json.dumps({"stream": "btcusdt@depth20@100ms", "data": {"E": self.n, "u": self.n, "b": [["1", "1"]], "a": [["2", "1"]]}})
+
+    monkeypatch.setitem(sys.modules, "websockets", types.SimpleNamespace(connect=lambda url, **k: FakeWS(url)))
+    asyncio.run(recorder.record("btcusdt", tmp_path, minutes=0.01, flush_seconds=0.2))
+    assert list((tmp_path / "trades").glob("*.parquet")) and list((tmp_path / "book").glob("*.parquet"))

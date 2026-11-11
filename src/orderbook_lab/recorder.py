@@ -30,13 +30,20 @@ import pandas as pd
 
 log = logging.getLogger("recorder")
 
-BASE_URL = "wss://fstream.binance.com/stream?streams="
+PUBLIC_URL = "wss://fstream.binance.com/public/stream?streams="
+MARKET_URL = "wss://fstream.binance.com/market/stream?streams="
 N_LEVELS = 20
 
 
-def stream_url(symbol: str) -> str:
+def stream_urls(symbol: str) -> list[str]:
+    """Since the 2026-03 routing upgrade, USD-M streams live on separate paths:
+    /public for book data (depth, bookTicker), /market for trades (aggTrade).
+    An unrouted connection silently gets no aggTrade data."""
     s = symbol.lower()
-    return BASE_URL + "/".join([f"{s}@depth20@100ms", f"{s}@aggTrade", f"{s}@bookTicker"])
+    return [
+        PUBLIC_URL + f"{s}@depth20@100ms/{s}@bookTicker",
+        MARKET_URL + f"{s}@aggTrade",
+    ]
 
 
 def parse_message(msg: dict, recv_ns: int) -> tuple[str, dict] | None:
@@ -78,42 +85,58 @@ class ChunkWriter:
 
     def flush(self) -> None:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-        for kind, rows in self.buf.items():
+        buf, self.buf = self.buf, defaultdict(list)
+        counts = []
+        for kind, rows in buf.items():
             if not rows:
                 continue
             d = self.out / kind
             d.mkdir(parents=True, exist_ok=True)
             pd.DataFrame(rows).to_parquet(d / f"{self.symbol}_{stamp}.parquet", index=False)
-            log.info("flushed %d %s rows", len(rows), kind)
-        self.buf.clear()
+            counts.append(f"{len(rows)} {kind}")
+        log.info("flushed %s", ", ".join(counts) if counts else "nothing (no data received!)")
+        if "trades" not in buf:
+            log.warning("no trades in this chunk - check the /market connection")
 
 
-async def record(symbol: str, out: Path, minutes: float, flush_seconds: float) -> None:
+async def _consume(url: str, writer: "ChunkWriter", deadline: float) -> None:
+    """Read one websocket until the deadline, reconnecting with backoff on any drop."""
     import websockets  # imported here so metrics/tests don't need it
 
-    writer = ChunkWriter(out, symbol)
-    deadline = time.monotonic() + minutes * 60
-    last_flush = time.monotonic()
+    name = url.split("/")[3]  # 'public' or 'market'
     backoff = 1.0
     while time.monotonic() < deadline:
         try:
-            async with websockets.connect(stream_url(symbol), ping_interval=20, max_size=2**22) as ws:
-                log.info("connected")
+            async with websockets.connect(url, ping_interval=20, max_size=2**22) as ws:
+                log.info("connected: %s", name)
                 backoff = 1.0
                 while time.monotonic() < deadline:
                     raw = await asyncio.wait_for(ws.recv(), timeout=30)
                     parsed = parse_message(json.loads(raw), time.time_ns())
                     if parsed:
                         writer.add(*parsed)
-                    if time.monotonic() - last_flush >= flush_seconds:
-                        writer.flush()
-                        last_flush = time.monotonic()
-        except (asyncio.TimeoutError, OSError, Exception) as e:  # noqa: BLE001 - keep recording
-            log.warning("connection dropped (%s); reconnecting in %.0fs", e, backoff)
-            writer.flush()
+        except Exception as e:  # noqa: BLE001 - keep recording
+            log.warning("%s dropped (%s); reconnecting in %.0fs", name, e, backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
-    writer.flush()
+
+
+async def _flusher(writer: "ChunkWriter", deadline: float, flush_seconds: float) -> None:
+    while time.monotonic() < deadline:
+        await asyncio.sleep(min(flush_seconds, max(0.0, deadline - time.monotonic())))
+        writer.flush()
+
+
+async def record(symbol: str, out: Path, minutes: float, flush_seconds: float) -> None:
+    writer = ChunkWriter(out, symbol)
+    deadline = time.monotonic() + minutes * 60
+    try:
+        await asyncio.gather(
+            *(_consume(u, writer, deadline) for u in stream_urls(symbol)),
+            _flusher(writer, deadline, flush_seconds),
+        )
+    finally:
+        writer.flush()  # also runs on Ctrl+C
 
 
 def main() -> None:
