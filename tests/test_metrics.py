@@ -115,3 +115,13 @@ def test_record_with_fake_websockets(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "websockets", types.SimpleNamespace(connect=lambda url, **k: FakeWS(url)))
     asyncio.run(recorder.record("btcusdt", tmp_path, minutes=0.01, flush_seconds=0.2))
     assert list((tmp_path / "trades").glob("*.parquet")) and list((tmp_path / "book").glob("*.parquet"))
+
+
+def test_taker_events_collapse_sweeps():
+    tr = pd.DataFrame({"E": [5, 6, 6, 9], "T": [5, 5, 5, 8], "price": [100.0, 100.1, 100.2, 99.0],
+                       "qty": [1.0, 1.0, 2.0, 1.0], "side": [1, 1, 1, -1]})
+    ev = M.taker_events(tr)
+    assert len(ev) == 2
+    sweep = ev.iloc[0]
+    assert sweep["E"] == 5 and sweep["qty"] == 4.0 and sweep["n_fills"] == 3
+    assert sweep["price"] == pytest.approx((100 + 100.1 + 200.4) / 4)

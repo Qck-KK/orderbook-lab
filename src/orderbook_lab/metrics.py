@@ -96,6 +96,21 @@ def markouts(trades: pd.DataFrame, tob: pd.DataFrame, horizons_s=(1, 5, 30)) -> 
     return out
 
 
+def taker_events(trades: pd.DataFrame) -> pd.DataFrame:
+    """Collapse aggTrades that share trade time T and side into one taker event.
+
+    One market order that sweeps several price levels shows up as several aggTrades with
+    the same T. Counting each piece separately over-weights sweeps (which are followed by
+    continued moves) and inflates average markouts. Uses T (matching time) as the clock."""
+    t = trades.copy()
+    clock = "T" if "T" in t.columns and t["T"].notna().all() else "E"
+    t["E"] = t[clock].astype("int64")
+    t["notional"] = t["price"] * t["qty"]
+    g = t.groupby(["E", "side"], as_index=False).agg(qty=("qty", "sum"), notional=("notional", "sum"), n_fills=("qty", "size"))
+    g["price"] = g["notional"] / g["qty"]
+    return g[["E", "price", "qty", "side", "n_fills"]].sort_values("E").reset_index(drop=True)
+
+
 def summarize_markouts(mo: pd.DataFrame, by_size_quantiles: int = 4) -> pd.DataFrame:
     """Mean markout by trade-size bucket (notional). Bigger trades are usually more informed."""
     mo = mo.copy()
