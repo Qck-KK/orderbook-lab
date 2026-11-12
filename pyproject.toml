@@ -3,7 +3,7 @@ name = "orderbook-lab"
 version = "0.1.0"
 description = "Record Binance perpetual order-book data and measure spread, depth, imbalance and trade markouts"
 requires-python = ">=3.10"
-dependencies = ["pandas>=2.0", "numpy", "pyarrow", "websockets>=12", "tabulate"]
+dependencies = ["pandas>=2.0", "numpy", "pyarrow", "websockets>=12", "tabulate", "matplotlib"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
