@@ -88,7 +88,7 @@ def test_end_to_end_report(tmp_path):
         w.add("trades", {"E": t, "price": 100.0, "qty": float(rng.uniform(0.01, 2)), "side": int(rng.choice([-1, 1]))})
     w.flush()
     text = build(tmp_path)
-    assert "Markouts" in text and "spread (bps)" in text
+    assert "Markouts" in text and "spread:" in text
 
 
 def test_stream_urls_are_routed():
@@ -125,3 +125,27 @@ def test_taker_events_collapse_sweeps():
     sweep = ev.iloc[0]
     assert sweep["E"] == 5 and sweep["qty"] == 4.0 and sweep["n_fills"] == 3
     assert sweep["price"] == pytest.approx((100 + 100.1 + 200.4) / 4)
+
+
+def test_window_and_compare(tmp_path, monkeypatch):
+    import sys
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from orderbook_lab import compare
+    base = int(datetime(2026, 11, 12, 15, 0, tzinfo=ZoneInfo("Europe/Berlin")).timestamp() * 1000)
+    rng = np.random.default_rng(0)
+    times = base + np.arange(0, 3_600_000, 1000)
+    mids = 77000 + np.cumsum(rng.normal(0, 1, len(times)))
+    w = ChunkWriter(tmp_path, "btcusdt")
+    for r in make_book(times, mids, spread=0.1, tick=0.1).to_dict("records"):
+        w.add("book", r)
+    for t, m in zip(times, mids):
+        w.add("bbo", {"E": int(t), "bid_px": m - .05, "ask_px": m + .05, "bid_qty": 1., "ask_qty": 1.})
+        w.add("trades", {"E": int(t) + 500, "T": int(t) + 500, "price": m, "qty": float(rng.uniform(.01, 1)), "side": int(rng.choice([-1, 1]))})
+    w.flush()
+    text = build(tmp_path, "15:30", "15:45")
+    assert "15:30-15:44" in text
+    out = tmp_path / "cmp.md"
+    monkeypatch.setattr(sys, "argv", ["x", str(tmp_path), f"{tmp_path}@15:00-15:30", "--out", str(out)])
+    compare.main()
+    assert out.exists() and out.with_suffix(".csv").exists()
