@@ -51,7 +51,7 @@ python -m orderbook_lab.plots data_a data_b@14:00-15:30 --labels A B --open-wind
 ![Activity, volatility and spread around the US equity open](figures/around_us_open.png)
 
 What the numbers say:
-1. **Activity scales, the touch does not.** Taker flow rose ~8x from the quiet evening to the US open, yet the spread stayed at one tick more than 99% of the time and top-5 depth stayed around 10 BTC.
+1. **Activity scales, the touch does not.** Taker flow rose ~8x from the quiet evening to the US open, yet the spread stayed at one tick more than 99% of the time and top-5 depth stayed around 10 BTC. On 11-12 the pick-up started around 15:10-15:20, before the equity open, so 15:30 is not a clean break in this sample.
 2. **Adverse selection dwarfs the spread.** With a one-tick spread (0.013 bps), the average taker event is followed by a 0.24-0.42 bps move in its direction within 1s (about 1 bps notional-weighted). Earning the spread alone does not pay for being picked off.
 3. **Size carries information, and in busy markets small orders do too.** Markouts rise with order size in every session. The largest quartile is stable (~0.55 bps); the smallest goes from noise (≈0) in the quiet evening to 0.32 bps after the US open.
 4. **Book imbalance predicts short-term moves, less so when the market is busy** (correlation 0.21 → 0.11). One possible reason is that 100 ms snapshots lag a faster-changing book; this data cannot tell.

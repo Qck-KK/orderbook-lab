@@ -42,16 +42,27 @@ def markouts_by_size(sessions, labels, out: Path):
     fig, ax = plt.subplots(figsize=(7, 4.2), facecolor=SURFACE)
     _style(ax)
     ax.axhline(0, color=INK2, linewidth=0.8)
+    ends = []
     for i, ((_, folder, start, end), lab) in enumerate(zip(sessions, labels)):
         q = stats(*load_window(folder, start, end))["_quartiles"]
         x = np.arange(1, len(q) + 1)
         y = q["mo_1s_bps"].to_numpy()
         ax.plot(x, y, color=SERIES[i], linewidth=2, marker=MARKERS[i], markersize=8,
                 markeredgecolor=SURFACE, markeredgewidth=2, label=lab)
-        ax.annotate(lab, (x[-1], y[-1]), xytext=(8, 0), textcoords="offset points",
+        ends.append((y[-1], lab, x[-1]))
+    # direct labels at the line ends, nudged apart so they never overlap
+    lo, hi = ax.get_ylim()
+    gap = 0.07 * (hi - lo)
+    ends.sort()
+    placed = []
+    for y, lab, x in ends:
+        yy = max(y, placed[-1] + gap) if placed else y
+        placed.append(yy)
+        ax.annotate(lab, (x, y), xytext=(x + 0.12, yy), textcoords="data",
                     va="center", fontsize=9, color=INK)
+    ax.set_ylim(lo, max(hi, placed[-1] + gap / 2))
     ax.set_xticks([1, 2, 3, 4], ["Q1\nsmallest", "Q2", "Q3", "Q4\nlargest"])
-    ax.set_xlim(0.7, 4.9)
+    ax.set_xlim(0.7, 5.0)
     ax.set_xlabel("Taker order size quartile (notional, within session)", color=INK2, fontsize=9)
     ax.set_ylabel("1s markout, bps (signed by aggressor)", color=INK2, fontsize=9)
     ax.set_title("Bigger taker orders move price more; in busy sessions small ones do too",
@@ -74,6 +85,10 @@ def around_open(window, out: Path):
     vol = np.log(s["mid"].resample("1s").last().ffill()).diff()
     vol_min = vol.resample("1min").std() * np.sqrt(365 * 24 * 3600) * 100
     wide = (s["spread"] > 0.15).resample("1min").mean() * 100
+    # drop partial minutes at either edge (they look like activity collapses)
+    t_first, t_last = s.index[0], s.index[-1]
+    full = lambda ser: ser[(ser.index >= t_first.ceil("1min")) & (ser.index + pd.Timedelta("1min") <= t_last)]
+    events, vol_min, wide = full(events), full(vol_min), full(wide)
 
     fig, axes = plt.subplots(3, 1, figsize=(7.5, 6.6), sharex=True, facecolor=SURFACE)
     panels = [(events, "Taker events per minute"),
